@@ -101,6 +101,8 @@ public class BehaviourProvider {
 				LCD.clearDisplay();
 				LCD.drawString(currentDirection.name(), 4, 4);
 
+				double currentAngularSpeed = pilot.getAngularSpeed();
+				pilot.setAngularSpeed(10);
 				switch (currentDirection) {
 				case LEFT: {
 					while (currentDirection != null) {
@@ -117,6 +119,9 @@ public class BehaviourProvider {
 					break;
 				}
 				}
+				
+				//restore the original angular speed
+				pilot.setAngularSpeed(currentAngularSpeed);
 
 			}
 
@@ -197,8 +202,8 @@ public class BehaviourProvider {
 		@Override
 		public void action() {
 			if (isTriggered) {
-				Sound.playSample(new File("Betty1.wav"));
-				Sound.playSample(new File("Betty2.wav"));
+				Sound.playSample(new File("Betty4.wav"));
+				//Sound.playSample(new File("Betty2.wav"));
 				isTriggered = false;
 			}
 		}

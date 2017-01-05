@@ -77,6 +77,15 @@ public class RestApiHandlerThread implements Runnable {
 		this.listeners.get(API_EVENT.ALL).add(callback);
 	}
 
+	synchronized public void closeServerSocket() {
+		try {
+			this.ss.close();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
+	
 	@Override
 	public void run() {
 		// Thread.currentThread().setPriority(Thread.MIN_PRIORITY);
@@ -102,7 +111,7 @@ public class RestApiHandlerThread implements Runnable {
 					if (cmd == null)
 						break;
 
-					System.out.println("Received request: " + cmd);
+					//System.out.println("Received request: " + cmd);
 					String[] tokens = cmd.split(" ");
 					if (tokens.length <= 1 || !tokens[0].equals("GET")) {
 						ps.println(BAD_REQUEST);

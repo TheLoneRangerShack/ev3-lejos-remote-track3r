@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import com.loneranger.lejos.arbitrator.ImprovedArbitrator;
 import com.loneranger.lejos.behaviour.BehaviourProvider;
 import com.loneranger.lejos.control.web.RestApiHandlerThread.API_EVENT;
 
@@ -20,11 +21,11 @@ import lejos.robotics.chassis.Chassis;
 import lejos.robotics.chassis.Wheel;
 import lejos.robotics.chassis.WheeledChassis;
 import lejos.robotics.navigation.MovePilot;
-import lejos.robotics.subsumption.Arbitrator;
 import lejos.robotics.subsumption.Behavior;
 
-
 public class ApiControlledTrack3r {
+	public static boolean endOfProgram = false;
+	
 	// standard track3r wheel dimensions in mm
 	public static Wheel TRACK3R_LEFT_WHEEL = WheeledChassis.modelWheel(new EV3LargeRegulatedMotor(MotorPort.C), 30)
 			.offset(97.5).gearRatio(1);
@@ -50,15 +51,16 @@ public class ApiControlledTrack3r {
 		return infraredSensor;
 	}
 
-
 	public static class AbortBehaviour implements Behavior {
 		volatile private boolean isTriggered = false;
 		private final MovePilot pilot;
 		private final ExecutorService apiHandler;
+		private final RestApiHandlerThread apiThread;
 
-		public AbortBehaviour(MovePilot pilot, ExecutorService apiHandler) {
+		public AbortBehaviour(MovePilot pilot, ExecutorService apiHandler, RestApiHandlerThread apiThread) {
 			this.pilot = pilot;
 			this.apiHandler = apiHandler;
+			this.apiThread = apiThread;
 		}
 
 		@Override
@@ -69,7 +71,9 @@ public class ApiControlledTrack3r {
 		@Override
 		public void action() {
 			pilot.stop();
+			apiThread.closeServerSocket();
 			apiHandler.shutdownNow();
+			endOfProgram = true;
 		}
 
 		@Override
@@ -81,6 +85,33 @@ public class ApiControlledTrack3r {
 
 		public void setEscapePressed() {
 			this.isTriggered = true;
+		}
+
+	}
+
+	public static class FallbackBehaviour implements Behavior {
+
+		volatile private boolean isSuppressed = false;
+		
+		@Override
+		public boolean takeControl() {
+			return true;
+		}
+
+		@Override
+		public void action() {
+			while(!isSuppressed && !endOfProgram) {
+				Thread.yield();
+			}
+			
+			isSuppressed = false;
+			
+		}
+
+		@Override
+		public void suppress() {
+			isSuppressed = true;
+			
 		}
 
 	}
@@ -112,31 +143,31 @@ public class ApiControlledTrack3r {
 	//
 	// }
 
-//	public static class FallbackBehaviour implements Behavior {
-//		@Override
-//		public boolean takeControl() {
-//			return true;
-//		}
-//
-//		@Override
-//		public void action() {
-//			while (true) {
-//				Sound.twoBeeps();
-//				try {
-//					Thread.sleep(1000);
-//				} catch (InterruptedException e) {
-//					break;
-//				}
-//			}
-//		}
-//
-//		@Override
-//		public void suppress() {
-//			// just stop the sound is all
-//
-//		}
-//
-//	}
+	// public static class FallbackBehaviour implements Behavior {
+	// @Override
+	// public boolean takeControl() {
+	// return true;
+	// }
+	//
+	// @Override
+	// public void action() {
+	// while (true) {
+	// Sound.twoBeeps();
+	// try {
+	// Thread.sleep(1000);
+	// } catch (InterruptedException e) {
+	// break;
+	// }
+	// }
+	// }
+	//
+	// @Override
+	// public void suppress() {
+	// // just stop the sound is all
+	//
+	// }
+	//
+	// }
 
 	public static void main(String[] args) throws IOException {
 		ApiControlledTrack3r parent = new ApiControlledTrack3r();
@@ -144,20 +175,20 @@ public class ApiControlledTrack3r {
 		Behavior forwardBackward = new BehaviourProvider.ForwardBackwardBehaviour(parent.getPilot());
 		Behavior leftRight = new BehaviourProvider.LeftRightBehaviour(parent.getPilot());
 		Behavior call = new BehaviourProvider.CallBehaviour();
+		Behavior fallback = new FallbackBehaviour();
 
 		// first the API handler that uses a separate low priority thread to
 		// listen to HTTP requests on port 80
 		ExecutorService threadPool = Executors.newFixedThreadPool(1);
 		RestApiHandlerThread handler = new RestApiHandlerThread();
-		handler.registerListener(API_EVENT.FORWARD, (Callback)forwardBackward);
-		handler.registerListener(API_EVENT.BACKWARD, (Callback)forwardBackward);
-		handler.registerListener(API_EVENT.LEFT, (Callback)leftRight);
-		handler.registerListener(API_EVENT.RIGHT, (Callback)leftRight);
-		handler.registerListener(API_EVENT.STOP, (Callback)stop);
-		handler.registerListener(API_EVENT.CALL, (Callback)call);
-		
+		handler.registerListener(API_EVENT.FORWARD, (Callback) forwardBackward);
+		handler.registerListener(API_EVENT.BACKWARD, (Callback) forwardBackward);
+		handler.registerListener(API_EVENT.LEFT, (Callback) leftRight);
+		handler.registerListener(API_EVENT.RIGHT, (Callback) leftRight);
+		handler.registerListener(API_EVENT.STOP, (Callback) stop);
+		handler.registerListener(API_EVENT.CALL, (Callback) call);
 
-		final AbortBehaviour abort = new AbortBehaviour(parent.getPilot(), threadPool);
+		final AbortBehaviour abort = new AbortBehaviour(parent.getPilot(), threadPool, handler);
 		Button.ESCAPE.addKeyListener(new KeyListener() {
 			@Override
 			public void keyPressed(Key k) {
@@ -174,16 +205,18 @@ public class ApiControlledTrack3r {
 
 		});
 
-		//FallbackBehaviour waitBehaviour = new FallbackBehaviour();
-		
+		// FallbackBehaviour waitBehaviour = new FallbackBehaviour();
+
 		// configure our behaviour arbiter
-		Behavior[] bArray = { call, forwardBackward, leftRight, stop, abort };
-		Arbitrator arbitrator = new Arbitrator(bArray);
+		Behavior[] bArray = { fallback, call, forwardBackward, leftRight, stop, abort };
+		ImprovedArbitrator arbitrator = new ImprovedArbitrator(bArray, true);
 
 		threadPool.submit(handler);
 		arbitrator.go();
-		
+		//arbitrator.stop();
+
 		Sound.beepSequenceUp();
+		LCD.refresh();
 		// start our listener//
 
 	}
