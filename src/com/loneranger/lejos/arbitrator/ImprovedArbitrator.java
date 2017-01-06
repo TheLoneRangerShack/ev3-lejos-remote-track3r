@@ -7,16 +7,17 @@ import lejos.robotics.subsumption.Behavior;
 /**
  * This is a variation of the standard lejos Arbitrator class (described in the
  * next paragraph) that fixes a bug in the way Arbitrators instantiated with
- * _returnWhenInactive=true The bug is that the loop in Arbitrator that runs the
- * highest priority action is configured to exist if there is no highest
- * priority action currently set. The only way the highest priority action can
- * be set is in the Monitor thread. If the Monitor thread's own loop doesn't run
- * after an action() is complete and before the loop exit condition is checked
- * in the main thread, our arbitrator exits - even if there's actually an
- * action() waiting to run which we would have known had the Monitor() thread
- * run in time. I'm trying to solve this using Java's CyclicBarrier to have the
- * main thread wait for the monitor thread to finish at least one execution
- * (@author - Abhinav Neelam)
+ * _returnWhenInactive=true behave. The bug is that the loop in Arbitrator that
+ * runs the highest priority action is configured to exit if there is no highest
+ * priority action currently set (and of course only if _returnWhenInactive is
+ * true). The only way the highest priority action can be set is in the Monitor
+ * thread. If the Monitor thread's own loop doesn't run after an action() is
+ * complete (when the parent thread sets the highest priority action to NONE)
+ * and before the loop exit condition is checked in the main thread, our
+ * arbitrator exits - even if there's actually an action() waiting to run which
+ * we would have known had the Monitor() thread run in time. I'm trying to solve
+ * this using Java's CountDownLatch to have the main thread wait for the monitor
+ * thread to finish at least one execution (@author - Abhinav Neelam)
  * 
  * 
  * An Arbitrator object manages a behavior control system by starting and
@@ -64,7 +65,7 @@ public class ImprovedArbitrator {
 	private int _active = NONE; // active behavior; set by monitor, used by
 								// start();
 	private boolean _returnWhenInactive;
-	
+
 	volatile private CountDownLatch monitorSingleRunChecker = null;
 	volatile public boolean keepRunning = true;
 	/**
@@ -94,7 +95,7 @@ public class ImprovedArbitrator {
 		_returnWhenInactive = returnWhenInactive;
 		monitor = new Monitor();
 		monitor.setDaemon(true);
-		//System.out.println("Arbitrator created");
+		// System.out.println("Arbitrator created");
 	}
 
 	/**
@@ -137,8 +138,8 @@ public class ImprovedArbitrator {
 				_behavior[_active].action();
 				_active = NONE; // no active behavior at the moment
 			}
-			
-			//now wait for the monitor to run atleast once//
+
+			// now wait for the monitor to run atleast once//
 			monitorSingleRunChecker = new CountDownLatch(1);
 			try {
 				monitorSingleRunChecker.await();
@@ -162,7 +163,7 @@ public class ImprovedArbitrator {
 	 */
 	private class Monitor extends Thread {
 
-	//	boolean more = true;
+		// boolean more = true;
 		int maxPriority = _behavior.length - 1;
 
 		public void run() {
@@ -186,8 +187,8 @@ public class ImprovedArbitrator {
 					if (_active != NONE && _highestPriority > _active) {
 						_behavior[active].suppress();
 					}
-					
-					if(monitorSingleRunChecker != null) {
+
+					if (monitorSingleRunChecker != null) {
 						monitorSingleRunChecker.countDown();
 					}
 				} // end synchronize block - main thread can run now
